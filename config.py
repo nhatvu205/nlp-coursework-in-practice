@@ -7,7 +7,7 @@ class Config:
     
     models_to_train = ['mbert', 'xlmr', 'phobert']
     
-    data_path = '/kaggle/working/ViQuADv2'
+    data_path = '/kaggle/working/ViQuAD2.0'
     train_dir = 'train'
     dev_dir = 'dev'
     test_dir = 'test'
