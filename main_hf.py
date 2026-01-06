@@ -282,19 +282,28 @@ def train_model(model_name, model_path, config):
     class HistoryCallback(TrainerCallback):
         def __init__(self, history):
             self.history = history
+            self.current_epoch = -1
+            self.last_train_loss = None
+        
+        def on_epoch_begin(self, args, state, control, **kwargs):
+            self.current_epoch = state.epoch if hasattr(state, 'epoch') else len(self.history['eval_loss'])
         
         def on_log(self, args, state, control, **kwargs):
             logs = kwargs.get('logs', {})
-            if 'loss' in logs and 'epoch' in logs:
-                if logs['epoch'] not in [h.get('epoch', -1) for h in self.history.get('train_loss', [])]:
-                    self.history['train_loss'].append({'epoch': logs['epoch'], 'loss': logs['loss']})
+            if 'loss' in logs:
+                self.last_train_loss = logs['loss']
+        
+        def on_epoch_end(self, args, state, control, **kwargs):
+            if self.last_train_loss is not None:
+                self.history['train_loss'].append(self.last_train_loss)
+                self.last_train_loss = None
         
         def on_evaluate(self, args, state, control, **kwargs):
             metrics = kwargs.get('metrics', {})
             epoch = state.epoch if hasattr(state, 'epoch') else len(self.history['eval_loss'])
-            self.history['eval_loss'].append({'epoch': epoch, 'loss': metrics.get('eval_loss', 0)})
-            self.history['eval_f1'].append({'epoch': epoch, 'f1': metrics.get('eval_f1', 0)})
-            self.history['eval_exact'].append({'epoch': epoch, 'em': metrics.get('eval_exact', 0)})
+            self.history['eval_loss'].append(metrics.get('eval_loss', 0))
+            self.history['eval_f1'].append(metrics.get('eval_f1', 0))
+            self.history['eval_exact'].append(metrics.get('eval_exact', 0))
     
     history_cb = HistoryCallback(training_history)
     trainer.add_callback(early_stopping_cb)
@@ -304,39 +313,48 @@ def train_model(model_name, model_path, config):
     
     eval_metrics = trainer.evaluate()
     
-    train_losses = [h['loss'] for h in training_history['train_loss']]
-    eval_losses = [h['loss'] for h in training_history['eval_loss']]
-    eval_f1s = [h['f1'] for h in training_history['eval_f1']]
-    eval_ems = [h['em'] for h in training_history['eval_exact']]
+    eval_losses = training_history['eval_loss']
+    eval_f1s = training_history['eval_f1']
+    eval_ems = training_history['eval_exact']
+    train_losses = training_history['train_loss']
     
-    epochs = range(1, len(eval_losses) + 1)
+    num_epochs = len(eval_losses)
+    if num_epochs == 0:
+        logger.warning(f"No evaluation metrics collected for {model_name}")
+        return {'f1': 0, 'em': 0}
+    
+    epochs = list(range(1, num_epochs + 1))
+    
+    if len(train_losses) != num_epochs:
+        logger.warning(f"Train losses count ({len(train_losses)}) != epochs ({num_epochs}), using eval loss for train loss")
+        train_losses = eval_losses.copy()
+    
     fig, axes = plt.subplots(2, 2, figsize=(12, 10))
     
-    if train_losses:
-        axes[0, 0].plot(epochs[:len(train_losses)], train_losses, 'b-', label='Train Loss')
-    axes[0, 0].plot(epochs, eval_losses, 'r-', label='Eval Loss')
+    axes[0, 0].plot(epochs, train_losses[:num_epochs], 'b-', label='Train Loss', marker='o')
+    axes[0, 0].plot(epochs, eval_losses, 'r-', label='Eval Loss', marker='s')
     axes[0, 0].set_title(f'{model_name.upper()} - Loss')
     axes[0, 0].set_xlabel('Epoch')
     axes[0, 0].set_ylabel('Loss')
     axes[0, 0].legend()
     axes[0, 0].grid(True)
     
-    axes[0, 1].plot(epochs, eval_f1s, 'g-', label='Eval F1')
+    axes[0, 1].plot(epochs, eval_f1s, 'g-', label='Eval F1', marker='o')
     axes[0, 1].set_title(f'{model_name.upper()} - F1 Score')
     axes[0, 1].set_xlabel('Epoch')
     axes[0, 1].set_ylabel('F1 Score')
     axes[0, 1].legend()
     axes[0, 1].grid(True)
     
-    axes[1, 0].plot(epochs, eval_ems, 'm-', label='Eval EM')
+    axes[1, 0].plot(epochs, eval_ems, 'm-', label='Eval EM', marker='o')
     axes[1, 0].set_title(f'{model_name.upper()} - Exact Match')
     axes[1, 0].set_xlabel('Epoch')
     axes[1, 0].set_ylabel('Exact Match')
     axes[1, 0].legend()
     axes[1, 0].grid(True)
     
-    axes[1, 1].plot(epochs, eval_f1s, 'g-', label='F1')
-    axes[1, 1].plot(epochs, eval_ems, 'm-', label='EM')
+    axes[1, 1].plot(epochs, eval_f1s, 'g-', label='F1', marker='o')
+    axes[1, 1].plot(epochs, eval_ems, 'm-', label='EM', marker='s')
     axes[1, 1].set_title(f'{model_name.upper()} - F1 vs EM')
     axes[1, 1].set_xlabel('Epoch')
     axes[1, 1].set_ylabel('Score')
@@ -349,15 +367,27 @@ def train_model(model_name, model_path, config):
     test_results = {}
     if test_examples and predict_dataset:
         logger.info("Evaluating on test set...")
-        results = trainer.predict(predict_dataset, test_examples)
-        test_results = results.metrics
-        
-        logger.info(f"Test F1: {test_results.get('test_f1', 0):.4f}")
-        logger.info(f"Test EM: {test_results.get('test_exact', 0):.4f}")
+        try:
+            results = trainer.predict(predict_dataset, test_examples)
+            test_results = results.metrics
+            
+            logger.info(f"{model_name.upper()} - Test Results:")
+            logger.info(f"  Test F1: {test_results.get('test_f1', 0):.4f}")
+            logger.info(f"  Test EM: {test_results.get('test_exact', 0):.4f}")
+        except Exception as e:
+            logger.error(f"Error evaluating test set: {e}")
+            test_results = {}
+    
+    final_f1 = test_results.get('test_f1', eval_metrics.get('eval_f1', 0))
+    final_em = test_results.get('test_exact', eval_metrics.get('eval_exact', 0))
+    
+    logger.info(f"{model_name.upper()} - Final Results:")
+    logger.info(f"  F1 Score: {final_f1:.4f}")
+    logger.info(f"  Exact Match: {final_em:.4f}")
     
     return {
-        'f1': test_results.get('test_f1', eval_metrics.get('eval_f1', 0)),
-        'em': test_results.get('test_exact', eval_metrics.get('eval_exact', 0))
+        'f1': final_f1,
+        'em': final_em
     }
 
 
