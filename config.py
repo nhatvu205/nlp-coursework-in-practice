@@ -20,7 +20,7 @@ class Config:
     
     batch_size = 16
     learning_rate = 3e-5
-    num_epochs = 1
+    num_epochs = 10
     warmup_steps = 500
     weight_decay = 0.01
     
