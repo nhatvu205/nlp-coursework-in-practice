@@ -2,10 +2,10 @@ class Config:
     models = {
         'mbert': 'bert-base-multilingual-cased',
         'xlmr': 'xlm-roberta-base',
-        'phobert': 'vinai/phobert-base'
+        'roberta': 'roberta-base'
     }
     
-    models_to_train = ['mbert', 'xlmr', 'phobert']
+    models_to_train = ['mbert', 'xlmr', 'roberta']
     
     data_path = '/kaggle/working/ViQuAD2.0'
     train_dir = 'train'
@@ -20,7 +20,7 @@ class Config:
     
     batch_size = 16
     learning_rate = 3e-5
-    num_epochs = 10
+    num_epochs = 1
     warmup_steps = 500
     weight_decay = 0.01
     

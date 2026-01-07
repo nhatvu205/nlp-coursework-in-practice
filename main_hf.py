@@ -58,11 +58,18 @@ def train_model(model_name, model_path, config):
     raw_datasets = load_dataset("json", data_files=data_files, field="data")
     
     config_model = AutoConfig.from_pretrained(model_path)
-    tokenizer = AutoTokenizer.from_pretrained(model_path, use_fast=True)
-    model = AutoModelForQuestionAnswering.from_pretrained(model_path, config=config_model)
     
-    if not (hasattr(tokenizer, "_tokenizer") or getattr(tokenizer, "is_fast", False)):
-        raise TypeError("This script requires a fast tokenizer")
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(model_path, use_fast=True)
+        is_fast = hasattr(tokenizer, "_tokenizer") or getattr(tokenizer, "is_fast", False)
+        if not is_fast:
+            logger.warning(f"{model_name} does not have fast tokenizer, using slow tokenizer")
+            tokenizer = AutoTokenizer.from_pretrained(model_path, use_fast=False)
+    except Exception as e:
+        logger.warning(f"Could not load fast tokenizer for {model_name}: {e}, using slow tokenizer")
+        tokenizer = AutoTokenizer.from_pretrained(model_path, use_fast=False)
+    
+    model = AutoModelForQuestionAnswering.from_pretrained(model_path, config=config_model)
     
     column_names = raw_datasets["train"].column_names
     question_column_name = "question" if "question" in column_names else column_names[0]
@@ -362,39 +369,94 @@ def train_model(model_name, model_path, config):
     axes[1, 1].grid(True)
     
     plt.tight_layout()
-    plt.show()
+    
+    os.makedirs(config.output_dir, exist_ok=True)
+    plot_path = os.path.join(config.output_dir, f"{model_name}_training_history.png")
+    plt.savefig(plot_path, dpi=150, bbox_inches='tight')
+    logger.info(f"Saved training history plot to {plot_path}")
+    plt.close()
+    
+    train_metrics = {}
+    if train_result and hasattr(train_result, 'metrics'):
+        train_metrics = train_result.metrics
+    
+    train_metrics_result = {}
+    try:
+        train_predictions = trainer.predict(train_dataset)
+        train_metrics_result = train_predictions.metrics if hasattr(train_predictions, 'metrics') else {}
+    except Exception as e:
+        logger.warning(f"Could not evaluate on training set: {e}")
+    
+    logger.info("\n" + "="*60)
+    logger.info(f"{model_name.upper()} - SUMMARY STATISTICS")
+    logger.info("="*60)
+    
+    logger.info("\n📊 TRAINING SET:")
+    logger.info(f"  Loss: {train_metrics.get('train_loss', 'N/A'):.4f}" if isinstance(train_metrics.get('train_loss'), (int, float)) else f"  Loss: {train_metrics.get('train_loss', 'N/A')}")
+    if train_metrics_result:
+        logger.info(f"  F1 Score: {train_metrics_result.get('train_f1', 'N/A'):.4f}" if isinstance(train_metrics_result.get('train_f1'), (int, float)) else f"  F1 Score: {train_metrics_result.get('train_f1', 'N/A')}")
+        logger.info(f"  Exact Match: {train_metrics_result.get('train_exact', 'N/A'):.4f}" if isinstance(train_metrics_result.get('train_exact'), (int, float)) else f"  Exact Match: {train_metrics_result.get('train_exact', 'N/A')}")
+    logger.info(f"  Samples: {train_metrics.get('train_samples', 'N/A')}")
+    logger.info(f"  Runtime: {train_metrics.get('train_runtime', 'N/A'):.2f}s" if isinstance(train_metrics.get('train_runtime'), (int, float)) else f"  Runtime: {train_metrics.get('train_runtime', 'N/A')}")
+    
+    logger.info("\n📊 VALIDATION SET (DEV):")
+    logger.info(f"  Loss: {eval_metrics.get('eval_loss', 'N/A'):.4f}" if isinstance(eval_metrics.get('eval_loss'), (int, float)) else f"  Loss: {eval_metrics.get('eval_loss', 'N/A')}")
+    logger.info(f"  F1 Score: {eval_metrics.get('eval_f1', 'N/A'):.4f}" if isinstance(eval_metrics.get('eval_f1'), (int, float)) else f"  F1 Score: {eval_metrics.get('eval_f1', 'N/A')}")
+    logger.info(f"  Exact Match: {eval_metrics.get('eval_exact', 'N/A'):.4f}" if isinstance(eval_metrics.get('eval_exact'), (int, float)) else f"  Exact Match: {eval_metrics.get('eval_exact', 'N/A')}")
+    if 'eval_HasAns_f1' in eval_metrics:
+        logger.info(f"  HasAns F1: {eval_metrics.get('eval_HasAns_f1', 'N/A'):.4f}")
+        logger.info(f"  HasAns Exact: {eval_metrics.get('eval_HasAns_exact', 'N/A'):.4f}")
+    if 'eval_NoAns_f1' in eval_metrics:
+        logger.info(f"  NoAns F1: {eval_metrics.get('eval_NoAns_f1', 'N/A'):.4f}")
+        logger.info(f"  NoAns Exact: {eval_metrics.get('eval_NoAns_exact', 'N/A'):.4f}")
+    logger.info(f"  Samples: {eval_metrics.get('eval_samples', 'N/A')}")
     
     test_results = {}
     if test_examples and predict_dataset:
-        logger.info("Evaluating on test set...")
+        logger.info("\n📊 TEST SET:")
         try:
             results = trainer.predict(predict_dataset, test_examples)
             test_results = results.metrics
             
-            logger.info(f"{model_name.upper()} - Test Results:")
-            logger.info(f"  Test F1: {test_results.get('test_f1', 0):.4f}")
-            logger.info(f"  Test EM: {test_results.get('test_exact', 0):.4f}")
+            logger.info(f"  Loss: {test_results.get('test_loss', 'N/A'):.4f}" if isinstance(test_results.get('test_loss'), (int, float)) else f"  Loss: {test_results.get('test_loss', 'N/A')}")
+            logger.info(f"  F1 Score: {test_results.get('test_f1', 'N/A'):.4f}" if isinstance(test_results.get('test_f1'), (int, float)) else f"  F1 Score: {test_results.get('test_f1', 'N/A')}")
+            logger.info(f"  Exact Match: {test_results.get('test_exact', 'N/A'):.4f}" if isinstance(test_results.get('test_exact'), (int, float)) else f"  Exact Match: {test_results.get('test_exact', 'N/A')}")
+            if 'test_HasAns_f1' in test_results:
+                logger.info(f"  HasAns F1: {test_results.get('test_HasAns_f1', 'N/A'):.4f}")
+                logger.info(f"  HasAns Exact: {test_results.get('test_HasAns_exact', 'N/A'):.4f}")
+            if 'test_NoAns_f1' in test_results:
+                logger.info(f"  NoAns F1: {test_results.get('test_NoAns_f1', 'N/A'):.4f}")
+                logger.info(f"  NoAns Exact: {test_results.get('test_NoAns_exact', 'N/A'):.4f}")
+            logger.info(f"  Samples: {test_results.get('test_samples', 'N/A')}")
         except Exception as e:
             logger.error(f"Error evaluating test set: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             test_results = {}
+    else:
+        logger.info("\n📊 TEST SET: Not available")
     
-    final_f1 = test_results.get('test_f1', eval_metrics.get('eval_f1', 0))
-    final_em = test_results.get('test_exact', eval_metrics.get('eval_exact', 0))
+    logger.info("\n" + "="*60)
     
-    logger.info(f"{model_name.upper()} - Final Results:")
-    logger.info(f"  F1 Score: {final_f1:.4f}")
-    logger.info(f"  Exact Match: {final_em:.4f}")
+    final_f1 = test_results.get('test_f1', eval_metrics.get('eval_f1', 0)) if test_results else eval_metrics.get('eval_f1', 0)
+    final_em = test_results.get('test_exact', eval_metrics.get('eval_exact', 0)) if test_results else eval_metrics.get('eval_exact', 0)
     
     return {
         'f1': final_f1,
-        'em': final_em
+        'em': final_em,
+        'train_f1': train_metrics_result.get('train_f1', 0),
+        'train_em': train_metrics_result.get('train_exact', 0),
+        'eval_f1': eval_metrics.get('eval_f1', 0),
+        'eval_em': eval_metrics.get('eval_exact', 0),
+        'test_f1': test_results.get('test_f1', 0),
+        'test_em': test_results.get('test_exact', 0)
     }
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--models', type=str, nargs='+', 
-                       choices=['mbert', 'xlmr', 'phobert', 'all'],
+                       choices=['mbert', 'xlmr', 'roberta', 'all'],
                        default=None)
     args = parser.parse_args()
     
@@ -456,11 +518,20 @@ def main():
             ax.text(i + width/2, em + 0.01, f'{em:.3f}', ha='center', va='bottom')
         
         plt.tight_layout()
-        plt.show()
+        comparison_path = os.path.join(config.output_dir, "model_comparison.png")
+        plt.savefig(comparison_path, dpi=150, bbox_inches='tight')
+        logger.info(f"Saved comparison plot to {comparison_path}")
+        plt.close()
         
-        logger.info("\nDetailed Results:")
+        logger.info("\n" + "="*60)
+        logger.info("DETAILED RESULTS SUMMARY")
+        logger.info("="*60)
         for model_name in model_names:
-            logger.info(f"{model_name.upper()}: F1={results[model_name]['f1']:.4f}, EM={results[model_name]['em']:.4f}")
+            r = results[model_name]
+            logger.info(f"\n{model_name.upper()}:")
+            logger.info(f"  Train - F1: {r.get('train_f1', 0):.4f}, EM: {r.get('train_em', 0):.4f}")
+            logger.info(f"  Dev   - F1: {r.get('eval_f1', 0):.4f}, EM: {r.get('eval_em', 0):.4f}")
+            logger.info(f"  Test  - F1: {r.get('test_f1', 0):.4f}, EM: {r.get('test_em', 0):.4f}")
 
 
 if __name__ == "__main__":
