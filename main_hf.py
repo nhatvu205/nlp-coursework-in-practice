@@ -55,16 +55,31 @@ def load_flat_samples(split_dir):
                 "question": it.get("question", ""),
                 "is_impossible": it.get("is_impossible", False),
             }
+            
             if obj["is_impossible"]:
                 obj["answer"] = ""
             else:
+                obj["answer"] = ""
                 if "answer" in it and it["answer"]:
                     obj["answer"] = it["answer"]
-                elif "answers" in it and len(it["answers"]) > 0:
-                    ans0 = it["answers"][0]
-                    obj["answer"] = ans0["text"] if isinstance(ans0, dict) and "text" in ans0 else ans0
-                else:
-                    obj["answer"] = ""
+                elif "answers" in it:
+                    answers = it["answers"]
+                    if isinstance(answers, dict):
+                        if "text" in answers and isinstance(answers["text"], list) and len(answers["text"]) > 0:
+                            obj["answer"] = answers["text"][0]
+                        elif "text" in answers:
+                            obj["answer"] = answers["text"]
+                        elif "answer_start" in answers and len(answers.get("answer_start", [])) == 0:
+                            obj["answer"] = ""
+                        obj["is_impossible"] = answers.get("is_impossible", obj["is_impossible"])
+                    elif isinstance(answers, list) and len(answers) > 0:
+                        ans0 = answers[0]
+                        if isinstance(ans0, dict):
+                            obj["answer"] = ans0.get("text", ans0.get("answer", ""))
+                        else:
+                            obj["answer"] = str(ans0) if ans0 else ""
+                    elif isinstance(answers, str):
+                        obj["answer"] = answers
             samples.append(obj)
     return samples
 
