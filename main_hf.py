@@ -631,7 +631,7 @@ def main():
                        default=None)
     parser.add_argument('--llm_zero_shot', action='store_true', help='Run zero-shot LLM baseline')
     parser.add_argument('--llm_few_shot', action='store_true', help='Run few-shot LLM baseline')
-    parser.add_argument('--llm_models', type=str, nargs='+', choices=['youtu', 'qwen', 'all'], default=None)
+    parser.add_argument('--llm_models', type=str, nargs='+', choices=['phi2', 'qwen', 'all'], default=None)
     parser.add_argument('--sample_ratio', type=float, default=1.0, 
                        help='Ratio of data to sample for evaluation (0.0-1.0). Default: 1.0 (use all data)')
     args = parser.parse_args()
