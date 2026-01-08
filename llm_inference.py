@@ -194,12 +194,16 @@ def generate_answer(model, tokenizer, device, context, question, model_key, mode
 
 def evaluate_llm(model_key, samples, mode, output_dir, shots_per_prompt=3):
     os.makedirs(output_dir, exist_ok=True)
+    logger.info(f"Loading model {model_key}...")
     model, tokenizer, device = load_llm(model_key)
+    logger.info(f"Model loaded. Device: {device}. Starting inference on {len(samples)} samples...")
+    
     preds = []
     em_list = []
     f1_list = []
 
-    for i, ex in tqdm(enumerate(samples), total=len(samples), desc=f"{model_key.upper()} {mode}-shot"):
+    pbar = tqdm(enumerate(samples), total=len(samples), desc=f"{model_key.upper()} {mode}-shot", ncols=100)
+    for i, ex in pbar:
         shots = None
         if mode == "few":
             shots = choose_shots(samples, k=shots_per_prompt)
@@ -221,12 +225,22 @@ def evaluate_llm(model_key, samples, mode, output_dir, shots_per_prompt=3):
         )
         em_list.append(em)
         f1_list.append(f1)
+        
+        if (i + 1) % 10 == 0:
+            avg_f1 = sum(f1_list) / len(f1_list)
+            avg_em = sum(em_list) / len(em_list)
+            pbar.set_postfix({"F1": f"{avg_f1:.3f}", "EM": f"{avg_em:.3f}"})
+            pbar.refresh()
+    
+    pbar.close()
 
     metrics = {
         "f1": float(sum(f1_list) / len(f1_list)) if f1_list else 0.0,
         "em": float(sum(em_list) / len(em_list)) if em_list else 0.0,
         "count": len(preds),
     }
+
+    logger.info(f"Inference completed. Final F1: {metrics['f1']:.4f}, EM: {metrics['em']:.4f}")
 
     metrics_path = os.path.join(output_dir, f"llm_{model_key}_{mode}_metrics.json")
     preds_path = os.path.join(output_dir, f"llm_{model_key}_{mode}_preds.json")
