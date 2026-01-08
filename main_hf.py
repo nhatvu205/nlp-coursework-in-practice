@@ -84,6 +84,68 @@ def load_flat_samples(split_dir):
     return samples
 
 
+def load_ground_truth(test_dir):
+    ground_truth = {}
+    ground_truth_files = [f for f in os.listdir(test_dir) if 'ground_truth' in f.lower() and f.endswith('.json')]
+    
+    for filename in ground_truth_files:
+        filepath = os.path.join(test_dir, filename)
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                content = json.load(f)
+            
+            items = []
+            if isinstance(content, list):
+                items = content
+            elif isinstance(content, dict) and "data" in content:
+                items = content["data"]
+            
+            for it in items:
+                sample_id = it.get("id", "")
+                if not sample_id:
+                    continue
+                
+                answer = ""
+                is_impossible = it.get("is_impossible", False)
+                
+                if not is_impossible:
+                    if "answer" in it and it["answer"]:
+                        answer = it["answer"]
+                    elif "answers" in it:
+                        answers = it["answers"]
+                        if isinstance(answers, dict):
+                            if "text" in answers and isinstance(answers["text"], list) and len(answers["text"]) > 0:
+                                answer = answers["text"][0]
+                            elif "text" in answers:
+                                answer = answers["text"]
+                        elif isinstance(answers, list) and len(answers) > 0:
+                            ans0 = answers[0]
+                            if isinstance(ans0, dict):
+                                answer = ans0.get("text", ans0.get("answer", ""))
+                            else:
+                                answer = str(ans0) if ans0 else ""
+                        elif isinstance(answers, str):
+                            answer = answers
+                
+                ground_truth[sample_id] = {
+                    "answer": answer,
+                    "is_impossible": is_impossible
+                }
+        except Exception as e:
+            logger.warning(f"Error loading ground truth from {filename}: {e}")
+    
+    return ground_truth
+
+
+def merge_ground_truth(samples, ground_truth):
+    for sample in samples:
+        sample_id = sample.get("id", "")
+        if sample_id in ground_truth:
+            sample["answer"] = ground_truth[sample_id]["answer"]
+            sample["is_impossible"] = ground_truth[sample_id]["is_impossible"]
+    return samples
+
+
 def sample_data(samples, ratio=1.0, seed=42):
     if ratio >= 1.0:
         return samples
@@ -609,11 +671,32 @@ def main():
         dev_samples = load_flat_samples(os.path.join(config.data_path, config.dev_dir))
         test_samples = load_flat_samples(os.path.join(config.data_path, config.test_dir))
         
+        test_dir = os.path.join(config.data_path, config.test_dir)
+        ground_truth = load_ground_truth(test_dir)
+        if ground_truth:
+            logger.info(f"Loaded ground truth for {len(ground_truth)} test samples")
+            test_samples = merge_ground_truth(test_samples, ground_truth)
+            matched = sum(1 for s in test_samples if s.get("id") in ground_truth)
+            logger.info(f"Matched {matched}/{len(test_samples)} test samples with ground truth")
+            
+            test_samples_with_gt = [s for s in test_samples if s.get("id") in ground_truth]
+            logger.info(f"Filtering test set to only samples with ground truth: {len(test_samples_with_gt)} samples")
+            test_samples = test_samples_with_gt
+        else:
+            logger.warning("No ground truth file found for test set. Test metrics may be inaccurate.")
+            has_answer = sum(1 for s in test_samples if s.get("answer", "").strip() or s.get("is_impossible", False))
+            logger.info(f"Test samples with answers from test files: {has_answer}/{len(test_samples)}")
+            if has_answer == 0:
+                logger.warning("WARNING: No test samples have ground truth! Test metrics will be 0.")
+        
         if args.sample_ratio < 1.0:
             logger.info(f"Sampling {args.sample_ratio*100:.1f}% of data for evaluation")
             dev_samples = sample_data(dev_samples, ratio=args.sample_ratio, seed=config.seed)
             test_samples = sample_data(test_samples, ratio=args.sample_ratio, seed=config.seed)
             logger.info(f"Dev samples: {len(dev_samples)}, Test samples: {len(test_samples)}")
+            
+            has_answer_test = sum(1 for s in test_samples if s.get("answer", "").strip() or s.get("is_impossible", False))
+            logger.info(f"Test samples with ground truth after sampling: {has_answer_test}/{len(test_samples)}")
         
         llm_models = args.llm_models
         if not llm_models or "all" in llm_models:
