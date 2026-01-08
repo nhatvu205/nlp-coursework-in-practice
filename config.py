@@ -7,12 +7,12 @@ class Config:
     
     models_to_train = ['mbert', 'xlmr', 'roberta']
     
-    data_path = '/kaggle/working/ViQuAD2.0'
+    data_path = 'ViQuAD2.0'
     train_dir = 'train'
     dev_dir = 'dev'
     test_dir = 'test'
     
-    output_dir = '/kaggle/working/output'
+    output_dir = 'output'
     
     max_length = 384
     doc_stride = 128
