@@ -21,7 +21,7 @@ from transformers import (
 import evaluate
 from pytorch_qa.trainer_qa import QuestionAnsweringTrainer
 from pytorch_qa.utils_qa import postprocess_qa_predictions
-from llm_inference import evaluate_llm, LLM_MAP
+from llm_inference import evaluate_llm, evaluate_llm_samples, load_llm, LLM_MAP
 
 from config import Config
 
@@ -622,16 +622,35 @@ def main():
             if llm_key not in LLM_MAP:
                 logger.warning(f"Skipping unknown LLM key: {llm_key}")
                 continue
+            
+            logger.info(f"\n{'='*60}")
+            logger.info(f"Processing LLM: {llm_key.upper()}")
+            logger.info(f"{'='*60}")
+            
             if args.llm_zero_shot:
-                logger.info(f"\nRunning LLM zero-shot for {llm_key} on dev set")
-                evaluate_llm(llm_key, dev_samples, mode="zero", output_dir=config.output_dir)
-                logger.info(f"Running LLM zero-shot for {llm_key} on test set")
-                evaluate_llm(llm_key, test_samples, mode="zero", output_dir=config.output_dir)
+                logger.info(f"\n[LLM] Loading {llm_key.upper()} model for zero-shot inference...")
+                model, tokenizer, device = load_llm(llm_key)
+                logger.info(f"[LLM] Model loaded. Device: {device}")
+                
+                logger.info(f"\n[INFERENCE] Running zero-shot on dev set")
+                evaluate_llm_samples(model, tokenizer, device, llm_key, dev_samples, mode="zero", 
+                                   output_dir=config.output_dir, split_name="dev")
+                logger.info(f"[INFERENCE] Running zero-shot on test set")
+                evaluate_llm_samples(model, tokenizer, device, llm_key, test_samples, mode="zero", 
+                                   output_dir=config.output_dir, split_name="test")
+            
             if args.llm_few_shot:
-                logger.info(f"\nRunning LLM few-shot for {llm_key} on dev set")
-                evaluate_llm(llm_key, dev_samples, mode="few", output_dir=config.output_dir)
-                logger.info(f"Running LLM few-shot for {llm_key} on test set")
-                evaluate_llm(llm_key, test_samples, mode="few", output_dir=config.output_dir)
+                if not args.llm_zero_shot:
+                    logger.info(f"\n[LLM] Loading {llm_key.upper()} model for few-shot inference...")
+                    model, tokenizer, device = load_llm(llm_key)
+                    logger.info(f"[LLM] Model loaded. Device: {device}")
+                
+                logger.info(f"\n[INFERENCE] Running few-shot on dev set")
+                evaluate_llm_samples(model, tokenizer, device, llm_key, dev_samples, mode="few", 
+                                   output_dir=config.output_dir, split_name="dev")
+                logger.info(f"[INFERENCE] Running few-shot on test set")
+                evaluate_llm_samples(model, tokenizer, device, llm_key, test_samples, mode="few", 
+                                   output_dir=config.output_dir, split_name="test")
 
 
 if __name__ == "__main__":

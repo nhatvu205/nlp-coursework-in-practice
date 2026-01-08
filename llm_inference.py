@@ -194,17 +194,15 @@ def generate_answer(model, tokenizer, device, context, question, model_key, mode
     return answer
 
 
-def evaluate_llm(model_key, samples, mode, output_dir, shots_per_prompt=3):
+def evaluate_llm_samples(model, tokenizer, device, model_key, samples, mode, output_dir, split_name, shots_per_prompt=3):
     os.makedirs(output_dir, exist_ok=True)
-    logger.info(f"Loading model {model_key}...")
-    model, tokenizer, device = load_llm(model_key)
-    logger.info(f"Model loaded. Device: {device}. Starting inference on {len(samples)} samples...")
+    logger.info(f"[INFERENCE] Starting {mode}-shot inference on {split_name} set ({len(samples)} samples)...")
     
     preds = []
     em_list = []
     f1_list = []
 
-    pbar = tqdm(enumerate(samples), total=len(samples), desc=f"{model_key.upper()} {mode}-shot", ncols=100)
+    pbar = tqdm(enumerate(samples), total=len(samples), desc=f"{model_key.upper()} {mode}-shot {split_name}", ncols=100)
     for i, ex in pbar:
         shots = None
         if mode == "few":
@@ -242,10 +240,10 @@ def evaluate_llm(model_key, samples, mode, output_dir, shots_per_prompt=3):
         "count": len(preds),
     }
 
-    logger.info(f"Inference completed. Final F1: {metrics['f1']:.4f}, EM: {metrics['em']:.4f}")
+    logger.info(f"[INFERENCE] {split_name} set completed. F1: {metrics['f1']:.4f}, EM: {metrics['em']:.4f}")
 
-    metrics_path = os.path.join(output_dir, f"llm_{model_key}_{mode}_metrics.json")
-    preds_path = os.path.join(output_dir, f"llm_{model_key}_{mode}_preds.json")
+    metrics_path = os.path.join(output_dir, f"llm_{model_key}_{mode}_{split_name}_metrics.json")
+    preds_path = os.path.join(output_dir, f"llm_{model_key}_{mode}_{split_name}_preds.json")
     with open(metrics_path, "w", encoding="utf-8") as f:
         json.dump(metrics, f, ensure_ascii=False, indent=2)
     with open(preds_path, "w", encoding="utf-8") as f:
@@ -254,13 +252,21 @@ def evaluate_llm(model_key, samples, mode, output_dir, shots_per_prompt=3):
     fig, ax = plt.subplots(figsize=(5, 4))
     ax.bar(["F1", "EM"], [metrics["f1"], metrics["em"]], color=["skyblue", "salmon"])
     ax.set_ylim(0, 1.0)
-    ax.set_title(f"{model_key.upper()} - {mode} shot")
+    ax.set_title(f"{model_key.upper()} - {mode} shot ({split_name})")
     for j, v in enumerate([metrics["f1"], metrics["em"]]):
         ax.text(j, v + 0.01, f"{v:.3f}", ha="center", va="bottom")
     plt.tight_layout()
-    plot_path = os.path.join(output_dir, f"llm_{model_key}_{mode}_metrics.png")
+    plot_path = os.path.join(output_dir, f"llm_{model_key}_{mode}_{split_name}_metrics.png")
     plt.savefig(plot_path, dpi=150, bbox_inches="tight")
     plt.close()
 
     return metrics, preds_path, metrics_path, plot_path
+
+
+def evaluate_llm(model_key, samples, mode, output_dir, shots_per_prompt=3):
+    logger.info(f"[LLM] Loading {model_key.upper()} model for inference (NOT training)...")
+    model, tokenizer, device = load_llm(model_key)
+    logger.info(f"[LLM] Model {model_key.upper()} loaded. Device: {device}")
+    
+    return evaluate_llm_samples(model, tokenizer, device, model_key, samples, mode, output_dir, "eval", shots_per_prompt)
 
