@@ -3,6 +3,7 @@ import json
 import random
 import torch
 import matplotlib.pyplot as plt
+from tqdm import tqdm
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
 
@@ -198,7 +199,7 @@ def evaluate_llm(model_key, samples, mode, output_dir, shots_per_prompt=3):
     em_list = []
     f1_list = []
 
-    for i, ex in enumerate(samples):
+    for i, ex in tqdm(enumerate(samples), total=len(samples), desc=f"{model_key.upper()} {mode}-shot"):
         shots = None
         if mode == "few":
             shots = choose_shots(samples, k=shots_per_prompt)
