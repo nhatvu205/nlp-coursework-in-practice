@@ -509,7 +509,11 @@ def main():
         else:
             models_to_train = args.models
     else:
-        models_to_train = config.models_to_train
+        # CHỈ lấy từ config nếu KHÔNG có LLM flags
+        if not (args.llm_zero_shot or args.llm_few_shot):
+            models_to_train = config.models_to_train
+        else:
+            models_to_train = []  # Không train nếu chỉ chạy LLM
     
     valid_models = set(config.models.keys())
     models_to_train = [m for m in models_to_train if m in valid_models]
