@@ -124,54 +124,41 @@ def load_ground_truth(test_dir):
             
             logger.info(f"Ground truth file structure: {type(content)}, keys: {content.keys() if isinstance(content, dict) else 'N/A'}")
             
-            items = []
-            if isinstance(content, list):
-                items = content
-            elif isinstance(content, dict) and "data" in content:
-                items = content["data"]
-            elif isinstance(content, dict):
-                for key in content.keys():
-                    val = content[key]
-                    if isinstance(val, list):
-                        logger.info(f"Found list under key '{key}' with {len(val)} items")
-                        items = val
-                        break
-            
-            logger.info(f"Processing {len(items)} items from ground truth file")
-            if len(items) > 0:
-                logger.info(f"Sample ground truth entry: {items[0]}")
-            
-            for it in items:
-                sample_id = it.get("id", "")
-                if not sample_id:
-                    continue
+            if isinstance(content, dict) and "data" in content:
+                data = content["data"]
+                logger.info(f"Found 'data' key with {len(data)} items")
                 
-                answer = ""
-                is_impossible = it.get("is_impossible", False)
+                for article in data:
+                    paragraphs = article.get("paragraphs", [])
+                    logger.info(f"Processing article with {len(paragraphs)} paragraphs")
+                    
+                    for paragraph in paragraphs:
+                        qas = paragraph.get("qas", [])
+                        logger.info(f"Processing paragraph with {len(qas)} QA pairs")
+                        
+                        for qa in qas:
+                            sample_id = qa.get("id", "")
+                            if not sample_id:
+                                continue
+                            
+                            answer = ""
+                            is_impossible = qa.get("is_impossible", False)
+                            
+                            if not is_impossible:
+                                answers = qa.get("answers", [])
+                                if isinstance(answers, list) and len(answers) > 0:
+                                    answer = answers[0].get("text", "")
+                                elif isinstance(answers, dict):
+                                    answer = answers.get("text", "")
+                            
+                            ground_truth[sample_id] = {
+                                "answer": answer,
+                                "is_impossible": is_impossible
+                            }
                 
-                if not is_impossible:
-                    if "answer" in it and it["answer"]:
-                        answer = it["answer"]
-                    elif "answers" in it:
-                        answers = it["answers"]
-                        if isinstance(answers, dict):
-                            if "text" in answers and isinstance(answers["text"], list) and len(answers["text"]) > 0:
-                                answer = answers["text"][0]
-                            elif "text" in answers:
-                                answer = answers["text"]
-                        elif isinstance(answers, list) and len(answers) > 0:
-                            ans0 = answers[0]
-                            if isinstance(ans0, dict):
-                                answer = ans0.get("text", ans0.get("answer", ""))
-                            else:
-                                answer = str(ans0) if ans0 else ""
-                        elif isinstance(answers, str):
-                            answer = answers
-                
-                ground_truth[sample_id] = {
-                    "answer": answer,
-                    "is_impossible": is_impossible
-                }
+                logger.info(f"Extracted {len(ground_truth)} QA pairs from nested structure")
+            else:
+                logger.warning(f"Unexpected ground truth file structure: {type(content)}")
         except Exception as e:
             logger.error(f"Error loading ground truth from {filename}: {e}")
             import traceback
