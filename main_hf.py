@@ -84,6 +84,18 @@ def load_flat_samples(split_dir):
     return samples
 
 
+def sample_data(samples, ratio=1.0, seed=42):
+    if ratio >= 1.0:
+        return samples
+    if ratio <= 0.0:
+        return []
+    np.random.seed(seed)
+    n_samples = int(len(samples) * ratio)
+    indices = np.random.choice(len(samples), size=n_samples, replace=False)
+    sampled = [samples[i] for i in sorted(indices)]
+    return sampled
+
+
 def train_model(model_name, model_path, config):
     logger.info(f"Training {model_name.upper()}")
     
@@ -513,6 +525,8 @@ def main():
     parser.add_argument('--llm_zero_shot', action='store_true', help='Run zero-shot LLM baseline')
     parser.add_argument('--llm_few_shot', action='store_true', help='Run few-shot LLM baseline')
     parser.add_argument('--llm_models', type=str, nargs='+', choices=['youtu', 'qwen', 'all'], default=None)
+    parser.add_argument('--sample_ratio', type=float, default=1.0, 
+                       help='Ratio of data to sample for evaluation (0.0-1.0). Default: 1.0 (use all data)')
     args = parser.parse_args()
     
     config = Config()
@@ -594,6 +608,13 @@ def main():
     if args.llm_zero_shot or args.llm_few_shot:
         dev_samples = load_flat_samples(os.path.join(config.data_path, config.dev_dir))
         test_samples = load_flat_samples(os.path.join(config.data_path, config.test_dir))
+        
+        if args.sample_ratio < 1.0:
+            logger.info(f"Sampling {args.sample_ratio*100:.1f}% of data for evaluation")
+            dev_samples = sample_data(dev_samples, ratio=args.sample_ratio, seed=config.seed)
+            test_samples = sample_data(test_samples, ratio=args.sample_ratio, seed=config.seed)
+            logger.info(f"Dev samples: {len(dev_samples)}, Test samples: {len(test_samples)}")
+        
         llm_models = args.llm_models
         if not llm_models or "all" in llm_models:
             llm_models = list(LLM_MAP.keys())
