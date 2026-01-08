@@ -7,8 +7,8 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 
 
 LLM_MAP = {
-    "youtu": "tencent/Youtu-LLM-2B",
     "qwen": "Qwen/Qwen2.5-3B-Instruct",
+    "phi2": "microsoft/phi-2"
 }
 
 
@@ -117,29 +117,36 @@ def generate_answer(model, tokenizer, device, context, question, model_key, mode
     else:
         prompt_text = build_zero_shot_prompt(context, question)
 
-    if model_key == "qwen":
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    "Bạn là hệ thống Question Answering cho ViQuAD. "
-                    "Nhiệm vụ: trích xuất CHÍNH XÁC một cụm từ liên tiếp từ Context. "
-                    "Chỉ trả về CỤM TỪ TRẢ LỜI. "
-                    "KHÔNG viết câu hoàn chỉnh. "
-                    "KHÔNG giải thích. "
-                    "KHÔNG thêm ký tự nào khác."
-                )
-            },
-            {
-                "role": "user",
-                "content": prompt_text
-            }
-        ]
-        prompt = tokenizer.apply_chat_template(
-            messages,
-            tokenize=False,
-            add_generation_prompt=True
+    use_chat_template = model_key in ["qwen", "llama2", "mistral"]
+    
+    if use_chat_template:
+        system_msg = (
+            "Bạn là hệ thống Question Answering cho ViQuAD. "
+            "Nhiệm vụ: trích xuất CHÍNH XÁC một cụm từ liên tiếp từ Context. "
+            "Chỉ trả về CỤM TỪ TRẢ LỜI. "
+            "KHÔNG viết câu hoàn chỉnh. "
+            "KHÔNG giải thích. "
+            "KHÔNG thêm ký tự nào khác."
         )
+        
+        if model_key == "qwen":
+            messages = [
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": prompt_text}
+            ]
+        elif model_key in ["llama2", "mistral"]:
+            messages = [
+                {"role": "user", "content": f"{system_msg}\n\n{prompt_text}"}
+            ]
+        
+        try:
+            prompt = tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True
+            )
+        except Exception:
+            prompt = prompt_text
     else:
         prompt = prompt_text
 
