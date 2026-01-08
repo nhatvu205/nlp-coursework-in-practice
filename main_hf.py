@@ -91,6 +91,11 @@ def load_flat_samples(split_dir):
 def load_ground_truth(test_dir):
     ground_truth = {}
     logger.info(f"Searching for ground truth in: {test_dir}")
+    
+    gt_path = "/content/ViQuAD2.0/test/ground_truth_private_test.json"
+    logger.info(f"[DEBUG] Hardcoded ground truth path: {gt_path}")
+    logger.info(f"[DEBUG] File exists: {os.path.exists(gt_path)}")
+    
     if not os.path.exists(test_dir):
         logger.warning(f"Test directory not found: {test_dir}")
         return ground_truth
@@ -102,7 +107,13 @@ def load_ground_truth(test_dir):
     
     if not ground_truth_files:
         logger.warning(f"No ground truth files found matching pattern 'ground_truth*.json' in {test_dir}")
-        return ground_truth
+        logger.info(f"Trying hardcoded path instead: {gt_path}")
+        if os.path.exists(gt_path):
+            ground_truth_files = [os.path.basename(gt_path)]
+            test_dir = os.path.dirname(gt_path)
+            logger.info(f"Using hardcoded ground truth file: {ground_truth_files}")
+        else:
+            return ground_truth
     
     for filename in ground_truth_files:
         filepath = os.path.join(test_dir, filename)
@@ -716,8 +727,10 @@ def main():
 
     if args.llm_zero_shot or args.llm_few_shot:
         dev_dir = os.path.join(config.data_path, config.dev_dir)
-        test_dir = os.path.join(config.data_path, config.test_dir)
+        test_dir = "/content/ViQuAD2.0/test"
         
+        logger.info(f"[DEBUG] Hardcoded test_dir: {test_dir}")
+        logger.info(f"[DEBUG] test_dir exists: {os.path.exists(test_dir)}")
         logger.info(f"Loading dev samples from: {dev_dir}")
         logger.info(f"Loading test samples from: {test_dir}")
         
