@@ -150,20 +150,27 @@ def generate_answer(model, tokenizer, device, context, question, model_key, mode
         max_length=1024
     )
 
-    if device == "cuda":
-        inputs = {k: v.to(device) for k, v in inputs.items()}
-    else:
-        inputs = {k: v for k, v in inputs.items()}
+    input_ids = inputs["input_ids"]
+    attention_mask = inputs.get("attention_mask", None)
 
-    input_len = inputs["input_ids"].shape[1]
+    if device == "cuda":
+        input_ids = input_ids.to(device)
+        if attention_mask is not None:
+            attention_mask = attention_mask.to(device)
+
+    input_len = input_ids.shape[1]
 
     with torch.no_grad():
-        outputs = model.generate(
-            **inputs,
-            max_new_tokens=max_new_tokens,
-            do_sample=False,
-            eos_token_id=tokenizer.eos_token_id,
-        )
+        generate_kwargs = {
+            "input_ids": input_ids,
+            "max_new_tokens": max_new_tokens,
+            "do_sample": False,
+            "eos_token_id": tokenizer.eos_token_id,
+        }
+        if attention_mask is not None:
+            generate_kwargs["attention_mask"] = attention_mask
+        
+        outputs = model.generate(**generate_kwargs)
 
     generated_ids = outputs[0][input_len:]
     answer = tokenizer.decode(generated_ids, skip_special_tokens=True)
