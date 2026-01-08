@@ -86,19 +86,38 @@ def load_flat_samples(split_dir):
 
 def load_ground_truth(test_dir):
     ground_truth = {}
+    if not os.path.exists(test_dir):
+        logger.warning(f"Test directory not found: {test_dir}")
+        return ground_truth
+    
     ground_truth_files = [f for f in os.listdir(test_dir) if 'ground_truth' in f.lower() and f.endswith('.json')]
+    logger.info(f"Found ground truth files: {ground_truth_files}")
     
     for filename in ground_truth_files:
         filepath = os.path.join(test_dir, filename)
+        logger.info(f"Loading ground truth from: {filepath}")
         try:
             with open(filepath, "r", encoding="utf-8") as f:
                 content = json.load(f)
+            
+            logger.info(f"Ground truth file structure: {type(content)}, keys: {content.keys() if isinstance(content, dict) else 'N/A'}")
             
             items = []
             if isinstance(content, list):
                 items = content
             elif isinstance(content, dict) and "data" in content:
                 items = content["data"]
+            elif isinstance(content, dict):
+                for key in content.keys():
+                    val = content[key]
+                    if isinstance(val, list):
+                        logger.info(f"Found list under key '{key}' with {len(val)} items")
+                        items = val
+                        break
+            
+            logger.info(f"Processing {len(items)} items from ground truth file")
+            if len(items) > 0:
+                logger.info(f"Sample ground truth entry: {items[0]}")
             
             for it in items:
                 sample_id = it.get("id", "")
@@ -132,17 +151,34 @@ def load_ground_truth(test_dir):
                     "is_impossible": is_impossible
                 }
         except Exception as e:
-            logger.warning(f"Error loading ground truth from {filename}: {e}")
+            logger.error(f"Error loading ground truth from {filename}: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+    
+    logger.info(f"Loaded {len(ground_truth)} ground truth entries")
+    if len(ground_truth) > 0:
+        sample_ids = list(ground_truth.keys())[:3]
+        logger.info(f"Sample ground truth IDs: {sample_ids}")
     
     return ground_truth
 
 
 def merge_ground_truth(samples, ground_truth):
+    if len(samples) > 0:
+        logger.info(f"Sample test IDs before merge: {[s.get('id') for s in samples[:3]]}")
+    
+    matched = 0
     for sample in samples:
         sample_id = sample.get("id", "")
         if sample_id in ground_truth:
             sample["answer"] = ground_truth[sample_id]["answer"]
             sample["is_impossible"] = ground_truth[sample_id]["is_impossible"]
+            matched += 1
+    
+    logger.info(f"Merged ground truth for {matched}/{len(samples)} samples")
+    if matched == 0 and len(samples) > 0 and len(ground_truth) > 0:
+        logger.warning(f"No IDs matched! Test IDs type: {type(samples[0].get('id'))}, GT IDs type: {type(list(ground_truth.keys())[0])}")
+    
     return samples
 
 
