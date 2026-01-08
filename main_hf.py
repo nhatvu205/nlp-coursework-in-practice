@@ -21,6 +21,7 @@ from transformers import (
 import evaluate
 from pytorch_qa.trainer_qa import QuestionAnsweringTrainer
 from pytorch_qa.utils_qa import postprocess_qa_predictions
+from llm_inference import evaluate_llm, LLM_MAP
 
 from config import Config
 
@@ -30,6 +31,42 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)],
 )
 logger = logging.getLogger(__name__)
+
+
+def load_flat_samples(split_dir):
+    samples = []
+    if not os.path.isdir(split_dir):
+        return samples
+    for filename in os.listdir(split_dir):
+        if not filename.endswith(".json"):
+            continue
+        filepath = os.path.join(split_dir, filename)
+        with open(filepath, "r", encoding="utf-8") as f:
+            content = json.load(f)
+        items = []
+        if isinstance(content, list):
+            items = content
+        elif isinstance(content, dict) and "data" in content:
+            items = content["data"]
+        for it in items:
+            obj = {
+                "id": it.get("id", f"id_{len(samples)}"),
+                "context": it.get("context", ""),
+                "question": it.get("question", ""),
+                "is_impossible": it.get("is_impossible", False),
+            }
+            if obj["is_impossible"]:
+                obj["answer"] = ""
+            else:
+                if "answer" in it and it["answer"]:
+                    obj["answer"] = it["answer"]
+                elif "answers" in it and len(it["answers"]) > 0:
+                    ans0 = it["answers"][0]
+                    obj["answer"] = ans0["text"] if isinstance(ans0, dict) and "text" in ans0 else ans0
+                else:
+                    obj["answer"] = ""
+            samples.append(obj)
+    return samples
 
 
 def train_model(model_name, model_path, config):
@@ -458,6 +495,9 @@ def main():
     parser.add_argument('--models', type=str, nargs='+', 
                        choices=['mbert', 'xlmr', 'roberta', 'all'],
                        default=None)
+    parser.add_argument('--llm_zero_shot', action='store_true', help='Run zero-shot LLM baseline')
+    parser.add_argument('--llm_few_shot', action='store_true', help='Run few-shot LLM baseline')
+    parser.add_argument('--llm_models', type=str, nargs='+', choices=['youtu', 'qwen', 'all'], default=None)
     args = parser.parse_args()
     
     config = Config()
@@ -474,20 +514,19 @@ def main():
     valid_models = set(config.models.keys())
     models_to_train = [m for m in models_to_train if m in valid_models]
     
-    if not models_to_train:
+    results = {}
+    if models_to_train:
+        logger.info(f"Models to train: {[m.upper() for m in models_to_train]}")
+        for model_name in models_to_train:
+            try:
+                result = train_model(model_name, config.models[model_name], config)
+                results[model_name] = result
+            except Exception as e:
+                logger.error(f"Error training {model_name}: {e}")
+                continue
+    elif not (args.llm_zero_shot or args.llm_few_shot):
         logger.error(f"No valid models selected. Available: {list(config.models.keys())}")
         return
-    
-    logger.info(f"Models to train: {[m.upper() for m in models_to_train]}")
-    
-    results = {}
-    for model_name in models_to_train:
-        try:
-            result = train_model(model_name, config.models[model_name], config)
-            results[model_name] = result
-        except Exception as e:
-            logger.error(f"Error training {model_name}: {e}")
-            continue
     
     if results:
         logger.info("\n" + "="*60)
@@ -532,6 +571,27 @@ def main():
             logger.info(f"  Train - F1: {r.get('train_f1', 0):.4f}, EM: {r.get('train_em', 0):.4f}")
             logger.info(f"  Dev   - F1: {r.get('eval_f1', 0):.4f}, EM: {r.get('eval_em', 0):.4f}")
             logger.info(f"  Test  - F1: {r.get('test_f1', 0):.4f}, EM: {r.get('test_em', 0):.4f}")
+
+    if args.llm_zero_shot or args.llm_few_shot:
+        dev_samples = load_flat_samples(os.path.join(config.data_path, config.dev_dir))
+        test_samples = load_flat_samples(os.path.join(config.data_path, config.test_dir))
+        llm_models = args.llm_models
+        if not llm_models or "all" in llm_models:
+            llm_models = list(LLM_MAP.keys())
+        for llm_key in llm_models:
+            if llm_key not in LLM_MAP:
+                logger.warning(f"Skipping unknown LLM key: {llm_key}")
+                continue
+            if args.llm_zero_shot:
+                logger.info(f"\nRunning LLM zero-shot for {llm_key} on dev set")
+                evaluate_llm(llm_key, dev_samples, mode="zero", output_dir=config.output_dir)
+                logger.info(f"Running LLM zero-shot for {llm_key} on test set")
+                evaluate_llm(llm_key, test_samples, mode="zero", output_dir=config.output_dir)
+            if args.llm_few_shot:
+                logger.info(f"\nRunning LLM few-shot for {llm_key} on dev set")
+                evaluate_llm(llm_key, dev_samples, mode="few", output_dir=config.output_dir)
+                logger.info(f"Running LLM few-shot for {llm_key} on test set")
+                evaluate_llm(llm_key, test_samples, mode="few", output_dir=config.output_dir)
 
 
 if __name__ == "__main__":
