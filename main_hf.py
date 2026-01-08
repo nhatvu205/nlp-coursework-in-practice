@@ -720,7 +720,14 @@ def main():
             test_samples = test_samples_with_gt
         else:
             logger.warning("No ground truth file found for test set. Test metrics may be inaccurate.")
-            has_answer = sum(1 for s in test_samples if s.get("answer", "").strip() or s.get("is_impossible", False))
+            def has_valid_answer(s):
+                ans = s.get("answer", "")
+                if isinstance(ans, str):
+                    return ans.strip() != ""
+                elif isinstance(ans, list):
+                    return len(ans) > 0
+                return False
+            has_answer = sum(1 for s in test_samples if has_valid_answer(s) or s.get("is_impossible", False))
             logger.info(f"Test samples with answers from test files: {has_answer}/{len(test_samples)}")
             if has_answer == 0:
                 logger.warning("WARNING: No test samples have ground truth! Test metrics will be 0.")
@@ -731,7 +738,14 @@ def main():
             test_samples = sample_data(test_samples, ratio=args.sample_ratio, seed=config.seed)
             logger.info(f"Dev samples: {len(dev_samples)}, Test samples: {len(test_samples)}")
             
-            has_answer_test = sum(1 for s in test_samples if s.get("answer", "").strip() or s.get("is_impossible", False))
+            def has_valid_answer(s):
+                ans = s.get("answer", "")
+                if isinstance(ans, str):
+                    return ans.strip() != ""
+                elif isinstance(ans, list):
+                    return len(ans) > 0
+                return False
+            has_answer_test = sum(1 for s in test_samples if has_valid_answer(s) or s.get("is_impossible", False))
             logger.info(f"Test samples with ground truth after sampling: {has_answer_test}/{len(test_samples)}")
         
         llm_models = args.llm_models
