@@ -198,7 +198,15 @@ def evaluate_llm_samples(model, tokenizer, device, model_key, samples, mode, out
     os.makedirs(output_dir, exist_ok=True)
     logger.info(f"[INFERENCE] Starting {mode}-shot inference on {split_name} set ({len(samples)} samples)...")
     
-    has_ground_truth = sum(1 for s in samples if s.get("answer", "").strip() or s.get("is_impossible", False))
+    def has_valid_answer(s):
+        ans = s.get("answer", "")
+        if isinstance(ans, str):
+            return ans.strip() != ""
+        elif isinstance(ans, list):
+            return len(ans) > 0
+        return False
+    
+    has_ground_truth = sum(1 for s in samples if has_valid_answer(s) or s.get("is_impossible", False))
     logger.info(f"[INFERENCE] Samples with ground truth: {has_ground_truth}/{len(samples)}")
     if has_ground_truth == 0 and split_name == "test":
         logger.warning(f"[INFERENCE] WARNING: No ground truth found for {split_name} set! All metrics will be 0.")

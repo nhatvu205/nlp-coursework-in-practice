@@ -36,10 +36,14 @@ logger = logging.getLogger(__name__)
 def load_flat_samples(split_dir):
     samples = []
     if not os.path.isdir(split_dir):
+        logger.warning(f"Directory not found: {split_dir}")
         return samples
-    for filename in os.listdir(split_dir):
-        if not filename.endswith(".json"):
-            continue
+    
+    all_files = [f for f in os.listdir(split_dir) if f.endswith(".json")]
+    data_files = [f for f in all_files if 'ground_truth' not in f.lower()]
+    logger.info(f"Loading samples from {split_dir}: found {len(data_files)} data files (excluding ground truth)")
+    
+    for filename in data_files:
         filepath = os.path.join(split_dir, filename)
         with open(filepath, "r", encoding="utf-8") as f:
             content = json.load(f)
