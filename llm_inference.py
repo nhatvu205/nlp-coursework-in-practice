@@ -1,0 +1,188 @@
+import os
+import json
+import random
+import torch
+import matplotlib.pyplot as plt
+from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
+
+
+LLM_MAP = {
+    "youtu": "tencent/Youtu-LLM-2B",
+    "qwen": "Qwen/Qwen2.5-3B-Instruct",
+}
+
+
+def normalize_answer(s):
+    import re
+
+    def remove_articles(text):
+        return re.sub(r"\b(a|an|the)\b", " ", text)
+
+    def white_space_fix(text):
+        return " ".join(text.split())
+
+    def remove_punc(text):
+        exclude = set('!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~')
+        return "".join(ch for ch in text if ch not in exclude)
+
+    def lower(text):
+        return text.lower()
+
+    return white_space_fix(remove_articles(remove_punc(lower(s))))
+
+
+def compute_em(prediction, ground_truth):
+    return float(normalize_answer(prediction) == normalize_answer(ground_truth))
+
+
+def compute_f1(prediction, ground_truth):
+    pred_tokens = normalize_answer(prediction).split()
+    truth_tokens = normalize_answer(ground_truth).split()
+    if len(pred_tokens) == 0 or len(truth_tokens) == 0:
+        return float(pred_tokens == truth_tokens)
+    common = set(pred_tokens) & set(truth_tokens)
+    if len(common) == 0:
+        return 0.0
+    precision = len(common) / len(pred_tokens)
+    recall = len(common) / len(truth_tokens)
+    return 2 * precision * recall / (precision + recall)
+
+
+def build_zero_shot_prompt(context, question):
+    return (
+        "Bạn là hệ thống trả lời câu hỏi tiếng Việt. "
+        'Trả lời ngắn gọn dựa trên ngữ cảnh. Nếu không có đáp án trong ngữ cảnh, trả lời "Không có câu trả lời.".\n'
+        f"Ngữ cảnh: {context}\n"
+        f"Câu hỏi: {question}\n"
+        "Trả lời:"
+    )
+
+
+def build_few_shot_prompt(context, question, shots):
+    shot_blocks = []
+    for s in shots:
+        ans = s.get("answer", "Không có câu trả lời.")
+        if s.get("is_impossible"):
+            ans = "Không có câu trả lời."
+        shot_blocks.append(
+            f"Ngữ cảnh: {s['context']}\nCâu hỏi: {s['question']}\nTrả lời: {ans}\n"
+        )
+    shot_text = "\n".join(shot_blocks)
+    return (
+        "Bạn là hệ thống trả lời câu hỏi tiếng Việt. "
+        'Trả lời ngắn gọn dựa trên ngữ cảnh. Nếu không có đáp án trong ngữ cảnh, trả lời "Không có câu trả lời.".\n'
+        + shot_text
+        + f"Ngữ cảnh: {context}\nCâu hỏi: {question}\nTrả lời:"
+    )
+
+
+def load_llm(model_key, device=None):
+    model_id = LLM_MAP[model_key]
+    if device is None:
+        device = 0 if torch.cuda.is_available() else -1
+    tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
+    model = AutoModelForCausalLM.from_pretrained(
+        model_id,
+        torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+        device_map="auto" if torch.cuda.is_available() else None,
+        trust_remote_code=True,
+    )
+    gen_pipe = pipeline(
+        "text-generation",
+        model=model,
+        tokenizer=tokenizer,
+        device=device,
+    )
+    return gen_pipe
+
+
+def choose_shots(samples, k=3):
+    if len(samples) <= k:
+        return samples
+    positives = [s for s in samples if not s.get("is_impossible")]
+    negatives = [s for s in samples if s.get("is_impossible")]
+    shot_list = []
+    if positives:
+        shot_list.append(random.choice(positives))
+    if negatives:
+        shot_list.append(random.choice(negatives))
+    while len(shot_list) < k and samples:
+        shot_list.append(random.choice(samples))
+    return shot_list[:k]
+
+
+def generate_answer(pipe, context, question, mode="zero", shots=None, max_new_tokens=64):
+    if mode == "few" and shots:
+        prompt = build_few_shot_prompt(context, question, shots)
+    else:
+        prompt = build_zero_shot_prompt(context, question)
+    outputs = pipe(
+        prompt,
+        max_new_tokens=max_new_tokens,
+        do_sample=False,
+        temperature=0.2,
+        top_p=0.9,
+        eos_token_id=pipe.tokenizer.eos_token_id,
+    )
+    text = outputs[0]["generated_text"]
+    answer = text.split("Trả lời:")[-1].strip()
+    answer = answer.split("\n")[0].strip()
+    return answer
+
+
+def evaluate_llm(model_key, samples, mode, output_dir, shots_per_prompt=3):
+    os.makedirs(output_dir, exist_ok=True)
+    pipe = load_llm(model_key)
+    preds = []
+    em_list = []
+    f1_list = []
+
+    for i, ex in enumerate(samples):
+        shots = None
+        if mode == "few":
+            shots = choose_shots(samples, k=shots_per_prompt)
+        pred = generate_answer(
+            pipe, ex["context"], ex["question"], mode=mode, shots=shots
+        )
+        truth = ex.get("answer") or ""
+        if ex.get("is_impossible"):
+            truth = ""
+        em = compute_em(pred, truth)
+        f1 = compute_f1(pred, truth)
+        preds.append(
+            {
+                "id": ex.get("id", f"sample_{i}"),
+                "prediction": pred,
+                "ground_truth": truth,
+                "is_impossible": ex.get("is_impossible", False),
+            }
+        )
+        em_list.append(em)
+        f1_list.append(f1)
+
+    metrics = {
+        "f1": float(sum(f1_list) / len(f1_list)) if f1_list else 0.0,
+        "em": float(sum(em_list) / len(em_list)) if em_list else 0.0,
+        "count": len(preds),
+    }
+
+    metrics_path = os.path.join(output_dir, f"llm_{model_key}_{mode}_metrics.json")
+    preds_path = os.path.join(output_dir, f"llm_{model_key}_{mode}_preds.json")
+    with open(metrics_path, "w", encoding="utf-8") as f:
+        json.dump(metrics, f, ensure_ascii=False, indent=2)
+    with open(preds_path, "w", encoding="utf-8") as f:
+        json.dump(preds, f, ensure_ascii=False, indent=2)
+
+    fig, ax = plt.subplots(figsize=(5, 4))
+    ax.bar(["F1", "EM"], [metrics["f1"], metrics["em"]], color=["skyblue", "salmon"])
+    ax.set_ylim(0, 1.0)
+    ax.set_title(f"{model_key.upper()} - {mode} shot")
+    for j, v in enumerate([metrics["f1"], metrics["em"]]):
+        ax.text(j, v + 0.01, f"{v:.3f}", ha="center", va="bottom")
+    plt.tight_layout()
+    plot_path = os.path.join(output_dir, f"llm_{model_key}_{mode}_metrics.png")
+    plt.savefig(plot_path, dpi=150, bbox_inches="tight")
+    plt.close()
+
+    return metrics, preds_path, metrics_path, plot_path
+
