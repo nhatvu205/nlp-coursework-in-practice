@@ -86,12 +86,19 @@ def load_flat_samples(split_dir):
 
 def load_ground_truth(test_dir):
     ground_truth = {}
+    logger.info(f"Searching for ground truth in: {test_dir}")
     if not os.path.exists(test_dir):
         logger.warning(f"Test directory not found: {test_dir}")
         return ground_truth
     
-    ground_truth_files = [f for f in os.listdir(test_dir) if 'ground_truth' in f.lower() and f.endswith('.json')]
-    logger.info(f"Found ground truth files: {ground_truth_files}")
+    all_files = os.listdir(test_dir)
+    logger.info(f"All files in test directory: {all_files}")
+    ground_truth_files = [f for f in all_files if 'ground_truth' in f.lower() and f.endswith('.json')]
+    logger.info(f"Ground truth files found after filter: {ground_truth_files}")
+    
+    if not ground_truth_files:
+        logger.warning(f"No ground truth files found matching pattern 'ground_truth*.json' in {test_dir}")
+        return ground_truth
     
     for filename in ground_truth_files:
         filepath = os.path.join(test_dir, filename)
@@ -704,10 +711,17 @@ def main():
             logger.info(f"  Test  - F1: {r.get('test_f1', 0):.4f}, EM: {r.get('test_em', 0):.4f}")
 
     if args.llm_zero_shot or args.llm_few_shot:
-        dev_samples = load_flat_samples(os.path.join(config.data_path, config.dev_dir))
-        test_samples = load_flat_samples(os.path.join(config.data_path, config.test_dir))
-        
+        dev_dir = os.path.join(config.data_path, config.dev_dir)
         test_dir = os.path.join(config.data_path, config.test_dir)
+        
+        logger.info(f"Loading dev samples from: {dev_dir}")
+        logger.info(f"Loading test samples from: {test_dir}")
+        
+        dev_samples = load_flat_samples(dev_dir)
+        test_samples = load_flat_samples(test_dir)
+        
+        logger.info(f"Loaded {len(dev_samples)} dev samples, {len(test_samples)} test samples")
+        
         ground_truth = load_ground_truth(test_dir)
         if ground_truth:
             logger.info(f"Loaded ground truth for {len(ground_truth)} test samples")
