@@ -3,7 +3,7 @@ import json
 import random
 import torch
 import matplotlib.pyplot as plt
-from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
+from transformers import AutoTokenizer, AutoModelForCausalLM
 
 
 LLM_MAP = {
@@ -79,7 +79,7 @@ def build_few_shot_prompt(context, question, shots):
 def load_llm(model_key, device=None):
     model_id = LLM_MAP[model_key]
     if device is None:
-        device = 0 if torch.cuda.is_available() else -1
+        device = "cuda" if torch.cuda.is_available() else "cpu"
 
     tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
 
@@ -89,13 +89,11 @@ def load_llm(model_key, device=None):
         trust_remote_code=True,
     )
 
-    gen_pipe = pipeline(
-        "text-generation",
-        model=model,
-        tokenizer=tokenizer,
-        device=device,
-    )
-    return gen_pipe
+    if device == "cuda":
+        model = model.to(device)
+    model.eval()
+
+    return model, tokenizer, device
 
 
 def choose_shots(samples, k=3):
@@ -113,28 +111,75 @@ def choose_shots(samples, k=3):
     return shot_list[:k]
 
 
-def generate_answer(pipe, context, question, mode="zero", shots=None, max_new_tokens=64):
+def generate_answer(model, tokenizer, device, context, question, model_key, mode="zero", shots=None, max_new_tokens=64):
     if mode == "few" and shots:
-        prompt = build_few_shot_prompt(context, question, shots)
+        prompt_text = build_few_shot_prompt(context, question, shots)
     else:
-        prompt = build_zero_shot_prompt(context, question)
-    outputs = pipe(
+        prompt_text = build_zero_shot_prompt(context, question)
+
+    if model_key == "qwen":
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "Bạn là hệ thống Question Answering cho ViQuAD. "
+                    "Nhiệm vụ: trích xuất CHÍNH XÁC một cụm từ liên tiếp từ Context. "
+                    "Chỉ trả về CỤM TỪ TRẢ LỜI. "
+                    "KHÔNG viết câu hoàn chỉnh. "
+                    "KHÔNG giải thích. "
+                    "KHÔNG thêm ký tự nào khác."
+                )
+            },
+            {
+                "role": "user",
+                "content": prompt_text
+            }
+        ]
+        prompt = tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=True
+        )
+    else:
+        prompt = prompt_text
+
+    inputs = tokenizer(
         prompt,
-        max_new_tokens=max_new_tokens,
-        do_sample=False,
-        temperature=0.2,
-        top_p=0.9,
-        eos_token_id=pipe.tokenizer.eos_token_id,
+        return_tensors="pt",
+        truncation=True,
+        max_length=1024
     )
-    text = outputs[0]["generated_text"]
-    answer = text.split("Trả lời:")[-1].strip()
-    answer = answer.split("\n")[0].strip()
+
+    if device == "cuda":
+        inputs = {k: v.to(device) for k, v in inputs.items()}
+    else:
+        inputs = {k: v for k, v in inputs.items()}
+
+    input_len = inputs["input_ids"].shape[1]
+
+    with torch.no_grad():
+        outputs = model.generate(
+            **inputs,
+            max_new_tokens=max_new_tokens,
+            do_sample=False,
+            eos_token_id=tokenizer.eos_token_id,
+        )
+
+    generated_ids = outputs[0][input_len:]
+    answer = tokenizer.decode(generated_ids, skip_special_tokens=True)
+
+    answer = answer.strip().split("\n")[0]
+    answer = answer.strip(" .,:;\"'")
+
+    if "Trả lời:" in answer:
+        answer = answer.split("Trả lời:")[-1].strip()
+
     return answer
 
 
 def evaluate_llm(model_key, samples, mode, output_dir, shots_per_prompt=3):
     os.makedirs(output_dir, exist_ok=True)
-    pipe = load_llm(model_key)
+    model, tokenizer, device = load_llm(model_key)
     preds = []
     em_list = []
     f1_list = []
@@ -144,7 +189,7 @@ def evaluate_llm(model_key, samples, mode, output_dir, shots_per_prompt=3):
         if mode == "few":
             shots = choose_shots(samples, k=shots_per_prompt)
         pred = generate_answer(
-            pipe, ex["context"], ex["question"], mode=mode, shots=shots
+            model, tokenizer, device, ex["context"], ex["question"], model_key, mode=mode, shots=shots
         )
         truth = ex.get("answer") or ""
         if ex.get("is_impossible"):
