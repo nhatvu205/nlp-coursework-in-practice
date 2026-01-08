@@ -7,12 +7,12 @@ class Config:
     
     models_to_train = ['mbert', 'xlmr', 'roberta']
     
-    data_path = 'ViQuAD2.0'
+    data_path = '/content/ViQuAD2.0'
     train_dir = 'train'
     dev_dir = 'dev'
     test_dir = 'test'
     
-    output_dir = 'output'
+    output_dir = '/content/output'
     
     max_length = 384
     doc_stride = 128
@@ -29,4 +29,3 @@ class Config:
     
     seed = 42
     fp16 = True
-
