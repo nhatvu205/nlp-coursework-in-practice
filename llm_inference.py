@@ -3,9 +3,11 @@ import json
 import random
 import torch
 import matplotlib.pyplot as plt
+import logging
 from tqdm import tqdm
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
+logger = logging.getLogger(__name__)
 
 LLM_MAP = {
     "qwen": "Qwen/Qwen2.5-3B-Instruct",
